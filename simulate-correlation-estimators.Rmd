@@ -12,19 +12,335 @@ output:
   html_notebook: 
     number_sections: yes
     toc: yes
-    toc_float: true
+    toc_float: yes
+    highlight: kate
+    theme: flatly
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
-
-```{r}
-plot(cars)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+# Preparations for analysis
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+Loading packages to simulate and manipulate data. 
 
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+```{r}
+library(MASS)
+library(tidyverse)
+```
+
+
+# Simulate data
+
+Data generation is performed by simulating multivariate data based on the following conditions:
+- Correlation matrix between the items: 0.10, 0.15, 0.20, 0.25
+- Number of observations: 50, 100, 250, 500, 1000
+- Number of items: 3 to 12 items
+- Number of replications: 1000
+
+In this way, 200 *dataframes* are generated with different amounts of data within each of them, which will have 1,000 *replications*. In total, 200,000 *dataframes* with observations within each of them will be taken for analysis.
+
+
+## Generate matrices and observations
+
+Create the variables that indicate the conditions
+
+```{r}
+set.seed(2020) 
+r <- c(0.12, 0.20, 0.31, 0.50) ## Correlaciones 
+n <- c(50, 100, 250, 500, 1000) ## Tamaño de muestra
+replic <- 1000
+```
+
+
+```{r}
+# Generar las matrices de correlación
+sigma <- list()
+for (i in seq_along(r)) { 
+  sigma[[i]] <- matrix(data = c(1, rep(r[i], 2), 1),
+                       nrow = 2,
+                       ncol = 2)
+}
+
+
+# Generar los datos de correlación
+df_cor <- list()
+for (i in seq_along(sigma)) {
+  df_cor[[i]] <- list()
+  for (j in seq_along(n)) {
+    df_cor[[i]][[j]] <- list()
+    for (k in 1:replic) {
+      df_cor[[i]][[j]][[k]] <- mvrnorm(n     = n[j],
+                                       mu    = rep(0, 2),
+                                       Sigma = sigma[[i]]) %>% 
+        as_tibble()
+    }
+  }
+}
+```
+
+## Format the data as dataframe / tibbles
+
+The nested lists that we have created will be put together in order to have them identified with columns that indicate the sample size, the correlation and the replication number with which they were simulated.
+
+```{r}
+# Unir los datos y pasarlo a formato tidy
+temp <- df_cor
+df_cor <- list()
+for (i in seq_along(sigma)) {
+  df_cor[[i]] <- list()
+  for (j in seq_along(n)) {
+    df_cor[[i]][[j]] <- temp[[i]][[j]] %>% 
+      bind_rows(.id = "replic") %>% 
+      mutate(replic = as.numeric(replic))
+  }
+  df_cor[[i]] <- df_cor[[i]] %>% 
+    bind_rows(.id = "n") %>% 
+    mutate(n = recode(n, "1" = 50, "2" = 100,
+                      "3" = 250, "4" = 500, 
+                      "5" = 1000))
+}
+
+df_cor <- df_cor %>% 
+  bind_rows(.id = "correlacion") %>% 
+  mutate(correlacion = recode(correlacion, "1" = 0.12,
+                              "2" = 0.20, "3" = 0.31,
+                              "4" = 0.50)) %>% 
+  arrange(correlacion, n, replic)
+
+# Crear data nest
+df_nest <- df_cor %>% 
+  nest(data = c(V1, V2))
+
+rm(temp, i, j, k)
+```
+
+## Add outliers 
+
+```{r}
+# Agregar la cantidad de outliers a agregar y sus ubicaciones Outliers al 5%
+df_work <- df_nest %>% 
+  rowwise() %>% 
+  mutate(
+    ratio_outlier = map_dbl(n,
+                        ~ ceiling(0.05*n)),
+    posici_rep_m3 = map2(n, ratio_outlier,
+                         ~ sample(1:.x, .y)),
+    posici_rep_m6 = map2(n, ratio_outlier,
+                         ~ sample(1:.x, .y)),
+    posici_rep_m3v1 = map2(n, ratio_outlier,
+                          ~ sample(1:.x, .y)),
+    posici_rep_m3v2 = map2(n, ratio_outlier,
+                          ~ sample(1:.x, .y)),
+    posici_rep_m3v3 = map2(n, ratio_outlier,
+                          ~ sample(1:.x, .y)),
+    posici_rep_m6v1 = map2(n, ratio_outlier,
+                           ~ sample(1:.x, .y)),
+    posici_rep_m6v2 = map2(n, ratio_outlier,
+                           ~ sample(1:.x, .y)),
+    posici_rep_m6v3 = map2(n, ratio_outlier,
+                           ~ sample(1:.x, .y))
+  )
+
+# Agregar las correlaciones que no se consideraron
+df_work <- df_work %>% 
+  mutate(
+    correla_a = r[which(correlacion != r)[1]],
+    correla_b = r[which(correlacion != r)[2]],
+    correla_c = r[which(correlacion != r)[3]]
+  )
+```
+
+
+
+```{r}
+# Agregar las matrices de correlación
+df_work <- df_work %>% 
+  mutate(
+    matrix = map(correlacion,
+                 ~ matrix(data = rep(c(1, rep(.x, 2)), 2), 
+                          nrow = 2,
+                          ncol = 2)),
+    matrix_a = map(correla_a,
+                   ~ matrix(data = rep(c(1, rep(.x, 2)), 2), 
+                            nrow = 2,
+                            ncol = 2)),
+    matrix_b = map(correla_b,
+                   ~ matrix(data = rep(c(1, rep(.x, 2)), 2), 
+                            nrow = 2,
+                            ncol = 2)),
+    matrix_c = map(correla_c,
+                   ~ matrix(data = rep(c(1, rep(.x, 2)), 2), 
+                            nrow = 2,
+                            ncol = 2))
+  ) %>% 
+  ungroup()
+```
+
+
+
+```{r}
+# Agregar los outliers de acuerdo a la cantidad calculada (5% del total):
+#   - m1: Varía por la media de 3
+#   - m2: Varía por la media de 6
+#   - mv1: Varía por media de 3 y matrix_a
+#   - mv2: Varía por media de 3 y matrix_b
+#   - mv3: Varía por media de 3 y matrix_c
+set.seed(2019) 
+
+df_work <- df_work %>% 
+  mutate(
+    outlier_m3 = map2(ratio_outlier, matrix, 
+                      ~ mvrnorm(n     = .x,
+                                mu    = rep(3, 2),
+                                Sigma = .y) %>% 
+                        as_tibble()),
+    outlier_m6 = map2(ratio_outlier, matrix,
+                      ~ mvrnorm(n     = .x,
+                                mu    = rep(6, 2),
+                                Sigma = .y) %>% 
+                        as_tibble()),
+    outlier_m3v1 = map2(ratio_outlier, matrix_a, 
+                        ~ mvrnorm(n     = .x,
+                                  mu    = rep(3, 2),
+                                  Sigma = .y) %>% 
+                          as_tibble()),
+    outlier_m3v2 = map2(ratio_outlier, matrix_b, 
+                        ~ mvrnorm(n     = .x,
+                                  mu    = rep(3, 2),
+                                  Sigma = .y) %>% 
+                          as_tibble()),
+    outlier_m3v3 = map2(ratio_outlier, matrix_c, 
+                        ~ mvrnorm(n     = .x,
+                                  mu    = rep(3, 2),
+                                  Sigma = .y) %>% 
+                          as_tibble()),
+    outlier_m6v1 = map2(ratio_outlier, matrix_a, 
+                        ~ mvrnorm(n     = .x,
+                                  mu    = rep(6, 2),
+                                  Sigma = .y) %>% 
+                          as_tibble()),
+    outlier_m6v2 = map2(ratio_outlier, matrix_b, 
+                        ~ mvrnorm(n     = .x,
+                                  mu    = rep(6, 2),
+                                  Sigma = .y) %>% 
+                          as_tibble()),
+    outlier_m6v3 = map2(ratio_outlier, matrix_c, 
+                        ~ mvrnorm(n     = .x,
+                                  mu    = rep(6, 2),
+                                  Sigma = .y) %>% 
+                          as_tibble())
+  )
+
+
+# Crear las data con los outliers de acuerdo a las posiciones aleatorias en cada caso
+df_work <- df_work %>% 
+  mutate(
+    data_out_m3 = pmap(list(data, posici_rep_m3, outlier_m3),
+                       ~ ..1 %>% 
+                         slice(- ..2) %>% 
+                         bind_rows(..3)),
+    data_out_m6 = pmap(list(data, posici_rep_m6, outlier_m6),
+                       ~ ..1 %>% 
+                         slice(- ..2) %>% 
+                         bind_rows(..3)),
+    data_out_m3v1 = pmap(list(data, posici_rep_m3v1, outlier_m3v1),
+                         ~ ..1 %>% 
+                           slice(- ..2) %>% 
+                           bind_rows(..3)),
+    data_out_m3v2 = pmap(list(data, posici_rep_m3v2, outlier_m3v2),
+                         ~ ..1 %>% 
+                           slice(- ..2) %>% 
+                           bind_rows(..3)),
+    data_out_m3v3 = pmap(list(data, posici_rep_m3v3, outlier_m3v3),
+                         ~ ..1 %>% 
+                           slice(- ..2) %>% 
+                           bind_rows(..3)),
+    data_out_m6v1 = pmap(list(data, posici_rep_m6v1, outlier_m6v1),
+                         ~ ..1 %>% 
+                           slice(- ..2) %>% 
+                           bind_rows(..3)),
+    data_out_m6v2 = pmap(list(data, posici_rep_m6v2, outlier_m6v2),
+                         ~ ..1 %>% 
+                           slice(- ..2) %>% 
+                           bind_rows(..3)),
+    data_out_m6v3 = pmap(list(data, posici_rep_m6v3, outlier_m6v3),
+                         ~ ..1 %>% 
+                           slice(- ..2) %>% 
+                           bind_rows(..3))
+  )
+
+# NO NORMAL
+# 1. γ1 = 0, γ2 = 0 (normal distribution);
+# 2. γ1 = 0, γ2 = − 1.385 (symmetric platykurtic distribution);
+# 3. γ1 = 0, γ2 = 25 (symmetric leptokurtic distribution);
+# 4. γ1 = 0.96, γ2 = 0.13 (non-symmetric distribution);
+# 5. γ1 = 0.48, γ2 = − 0.92 (non-symmetric platykurtic distribution);
+# 6. γ1 = 2.5, γ2 = 25 (non-symmetric leptokurtic distribution).
+# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3279724/#:~:text=(1993)%2C%20and%20Shultz%20(,either%20true%20or%20error%20scores).&text=Consequently%2C%20coefficient%20alpha%20is%20not,reliability%20with%20non%2Dnormal%20data.
+
+set.seed(2021) 
+library(semTools)
+
+df_work <- df_work %>% 
+  mutate(
+    data_nonorm1 = map2(n, matrix,
+                        ~ mvrnonnorm(n = .x,
+                                     mu = rep(0, 2),
+                                     Sigma = .y,
+                                     skewness = c(0),
+                                     kurtosis = c(-1.385)) %>% # symmetric platykurtic distribution
+                          as_tibble()),
+    data_nonorm2 = map2(n, matrix,
+                        ~ mvrnonnorm(n = .x,
+                                     mu = rep(0, 2),
+                                     Sigma = .y,
+                                     skewness = 0,
+                                     kurtosis = 25) %>% # symmetric leptokurtic distribution 
+                          as_tibble()),
+    data_nonorm3 = map2(n, matrix,
+                        ~ mvrnonnorm(n = .x,
+                                     mu = rep(0, 2),
+                                     Sigma = .y,
+                                     skewness = 0.96,
+                                     kurtosis = 0.13) %>% # non-symmetric distribution
+                          as_tibble()),
+    data_nonorm4 = map2(n, matrix,
+                        ~ mvrnonnorm(n = .x,
+                                     mu = rep(0, 2),
+                                     Sigma = .y,
+                                     skewness = 0.48,
+                                     kurtosis = -0.92) %>% # non-symmetric platykurtic distribution
+                          as_tibble()),
+    data_nonorm5 = map2(n, matrix,
+                        ~ mvrnonnorm(n = .x,
+                                     mu = rep(0, 2),
+                                     Sigma = .y,
+                                     skewness = 2.5,
+                                     kurtosis = 25) %>% # non-symmetric leptokurtic distribution
+                          as_tibble())
+  )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
