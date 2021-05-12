@@ -336,6 +336,8 @@ Finally, the variables that will no longer be used are eliminated.
 ```{r}
 df_work <- df_work %>% 
   select(-c(ratio_outlier:outlier_m6v3))
+
+df_work
 ```
 
 
@@ -497,6 +499,8 @@ df_work_tidy_simp <- df_work_tidy_simp %>%
                         "Sesgo Spearman" = "sesgo_spear",
                         "Sesgo Winsorized" = "sesgo_winso")
   )
+
+df_work_tidy_simp
 ```
 
 ## Plots
@@ -704,6 +708,8 @@ df_work_tidy_evaluate <- df_work_tidy_evaluate %>%
                            "OL M6 V2", "OL M6 V3")
   ) %>% 
   arrange(correlacion, n, Tipo_Sim)
+
+df_work_tidy_evaluate
 ```
 
 ## Data format for evaluation
@@ -1099,7 +1105,3 @@ plot_B_as_ks <- df_work_tidy_B_as_ks %>%
 ```
 
 ![](img/Plot_ks_as_grouped_complete_size.png)
-
-
-
-
