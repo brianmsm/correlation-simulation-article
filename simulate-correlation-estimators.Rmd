@@ -353,22 +353,36 @@ df_work_tidy <- df_work %>%
   )
 ```
 
+## Settings multicore
+```{r}
+library(multidplyr)
+
+if (Sys.getenv("RSTUDIO") == "1" && !nzchar(Sys.getenv("RSTUDIO_TERM")) && 
+    (Sys.info()["sysname"] == "Darwin" || Sys.info()["sysname"] == "Linux") && 
+    getRversion() >= "4.0.0") {
+  parallel:::setDefaultClusterOptions(setup_strategy = "sequential")
+}
+
+cluster <- new_cluster(parallel::detectCores())
+```
+
 ## Correlations
 
 ```{r}
-library(WRS2)
 df_work_tidy <- df_work_tidy %>% 
+  partition(cluster) %>% 
   mutate(
-    cort_pears = map(Data,
-                     ~ cor.test(.x$V1, .x$V2,
-                                method = "pearson")),
-    cort_spear = map(Data,
-                     ~ cor.test(.x$V1, .x$V2,
-                                method = "spearman")),
-    cort_winso = map(Data,
-                     ~ wincor(.x$V1, .x$V2,
-                              tr = 0.2))
-  )
+    cort_pears = purrr::map(Data,
+                            ~ cor.test(.x$V1, .x$V2,
+                                       method = "pearson")),
+    cort_spear = purrr::map(Data,
+                            ~ cor.test(.x$V1, .x$V2,
+                                       method = "spearman")),
+    cort_winso = purrr::map(Data,
+                            ~ WRS2::wincor(.x$V1, .x$V2,
+                                           tr = 0.2))
+  ) %>% 
+  collect()
 ```
 
 ## Obtain the coefficients
@@ -377,16 +391,242 @@ df_work_tidy <- df_work_tidy %>%
 df_work_tidy <- df_work_tidy %>% 
   mutate(
     coef_pears = map_dbl(cort_pears,
-                         ~ .x$estimate[1]),
+                         ~ .x$estimate),
     coef_spear = map_dbl(cort_spear,
-                         ~ .x$estimate[1]),
+                         ~ .x$estimate),
     coef_winso = map_dbl(cort_winso,
-                         ~ .x$cor[1])
+                         ~ .x$cor),
+    pvalue_pears = map_dbl(cort_pears,
+                           ~ .x$p.value),
+    pvalue_spear = map_dbl(cort_spear,
+                           ~ .x$p.value),
+    pvalue_winso = map_dbl(cort_winso,
+                           ~ .x$p.value)
   )
 
 df_work_tidy_simp <- df_work_tidy %>% 
   select(-c(Data:cort_winso))
+
+df_work_tidy_simp
 ```
+
+## Generate plot about p-value
+
+## Plot with complete conditions
+
+### Data format
+```{r}
+df_work_tidy_pvalue <- df_work_tidy_simp %>% 
+  mutate(
+    across(c(pvalue_pears:pvalue_winso),
+           ~ case_when(
+             .x < .05 ~ 1,
+             TRUE ~ 0
+           )),
+    correlacion = factor(correlacion, 
+                         labels = c("0.12", "0.20",
+                                    "0.31", "0.50")) 
+  ) %>% 
+  group_by(correlacion, n, Tipo_Sim) %>% 
+  summarise(
+    across(
+      c(pvalue_pears:pvalue_winso),
+      ~ mean(.)
+    )
+  ) %>% 
+  ungroup() %>% 
+  pivot_longer(
+    cols = pvalue_pears:pvalue_winso,
+    names_to = "Estimator",
+    values_to = "Power"
+  ) %>% 
+  mutate(
+    Estimator = fct_recode(Estimator,
+                           "Pearson" = "pvalue_pears",
+                           "Spearman" = "pvalue_spear",
+                           "Winsorized" = "pvalue_winso")
+  )
+
+
+df_work_tidy_pvalue_A <- df_work_tidy_pvalue %>% 
+  mutate(
+    Tipo_Sim = fct_recode(Tipo_Sim,
+                          "MVN" = "data",
+                          "OL M3" = "data_out_m3",
+                          "OL M6" = "data_out_m6",
+                          "OL M3 V1" = "data_out_m3v1",
+                          "OL M3 V2" = "data_out_m3v2",
+                          "OL M3 V3" = "data_out_m3v3",
+                          "OL M6 V1" = "data_out_m6v1",
+                          "OL M6 V2" = "data_out_m6v2",
+                          "OL M6 V3" = "data_out_m6v3",
+                          "No-MVN A" = "data_nonorm1",
+                          "No-MVN B" = "data_nonorm2",
+                          "No-MVN C" = "data_nonorm3",
+                          "No-MVN D" = "data_nonorm4",
+                          "No-MVN E" = "data_nonorm5"),
+    Tipo_Sim = fct_relevel(Tipo_Sim,
+                           "MVN", "OL M3", "OL M6", "OL M3 V1", 
+                           "OL M3 V2", "OL M3 V3", "OL M6 V1",
+                           "OL M6 V2", "OL M6 V3")
+  ) %>% 
+  arrange(correlacion, n, Tipo_Sim)
+```
+
+### Plot generation
+
+```{r}
+plot_power_correlation_A <- ggplot(df_work_tidy_pvalue_A,
+       aes(x = Tipo_Sim,
+           y = Power,
+           shape = Estimator,
+           linetype = Estimator,
+           group = Estimator)) +
+  geom_point(color = "#3a3a3a", size = 2) +
+  geom_path(color = "#3a3a3a") +
+  scale_y_continuous(limits = c(0, 1),
+                     breaks = seq(0, 1, 0.2)) +
+    labs(title = "",
+         x = "Simulation conditions",
+         y = "Power Statistics") +
+  facet_grid(correlacion ~ n) +
+  theme_bw() + 
+  theme(
+    plot.title = element_text(hjust = 0.5,
+                              size = 12,
+                              face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    text = element_text(
+      size = 11,
+      face="bold"), 
+    axis.text = element_text(
+      size = 9,
+      face="plain",
+      colour="black"),
+    axis.text.x = element_text(angle = 55, 
+                               vjust= 1,
+                               hjust = 1),
+    axis.title.x = element_text(
+      size = 11,
+      margin = margin(t = 7, r = 0, b = 0, l = 0)
+    ),
+    strip.text = element_text(
+      size = 11
+    ),
+    legend.title = element_blank(),
+    legend.text = element_text(
+      face="plain",
+      colour="black",
+      size=10),
+    panel.spacing = unit(0.8, "lines")
+  ) 
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("img/Evaluate_power_correlation_A.png",
+       plot = plot_power_correlation_A,
+       height = 7,
+       width = 14,
+       dpi = 400)
+```
+
+
+```{r echo=FALSE, out.width='100%'}
+knitr::include_graphics("img/Evaluate_power_correlation_A.png",
+                        dpi = 400)
+```
+
+## Plot with summarised conditions
+
+### Data format
+
+```{r}
+df_work_tidy_pvalue_B <- df_work_tidy_pvalue %>%
+  mutate(
+    Tipo_Sim = fct_collapse(Tipo_Sim,
+                            "MVN" = "MVN",
+                            "MVN OL M3" = "OL M3",
+                            "MVN OL M6" = "OL M6",
+                            "MVN OL M3V" = c("OL M3 V1", "OL M3 V2", "OL M3 V3"),
+                            "MVN OL M6V" = c("OL M6 V1", "OL M6 V2", "OL M6 V3"),
+                            "No-MVN" = c("No-MVN A", "No-MVN C", "No-MVN D"),
+                            "No-MVN ks+" = c("No-MVN B", "No-MVN E")
+    )
+  ) 
+
+df_work_tidy_pvalue_B <- df_work_tidy_pvalue_B %>% 
+  group_by(correlacion, n, Tipo_Sim, Estimator) %>% 
+  summarise(
+    across(everything(), mean)
+  ) %>% 
+  ungroup()
+
+df_work_tidy_pvalue_B
+```
+
+### Plot generation
+
+```{r}
+plot_power_correlation_B <- ggplot(df_work_tidy_pvalue_B,
+       aes(x = Tipo_Sim,
+           y = Power,
+           shape = Estimator,
+           linetype = Estimator,
+           group = Estimator)) +
+  geom_point(color = "#3a3a3a", size = 2) +
+  geom_path(color = "#3a3a3a") +
+  scale_y_continuous(limits = c(0, 1),
+                     breaks = seq(0, 1, 0.2)) +
+    labs(title = "",
+         x = "Simulation conditions",
+         y = "Power Statistics") +
+  facet_grid(correlacion ~ n) +
+  theme_bw() + 
+  theme(
+    plot.title = element_text(hjust = 0.5,
+                              size = 12,
+                              face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    text = element_text(
+      size = 11,
+      face="bold"), 
+    axis.text = element_text(
+      size = 9,
+      face="plain",
+      colour="black"),
+    axis.text.x = element_text(angle = 45, 
+                               vjust= 1,
+                               hjust = 1),
+    axis.title.x = element_text(
+      size = 11,
+      margin = margin(t = 7, r = 0, b = 0, l = 0)
+    ),
+    strip.text = element_text(
+      size = 11
+    ),
+    legend.title = element_blank(),
+    legend.text = element_text(
+      face="plain",
+      colour="black",
+      size=10),
+    panel.spacing = unit(0.8, "lines")
+  ) 
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("img/Evaluate_power_correlation_B.png",
+       plot = plot_power_correlation_B,
+       height = 7,
+       width = 12,
+       dpi = 400)
+```
+
+
+```{r echo=FALSE, out.width='100%'}
+knitr::include_graphics("img/Evaluate_power_correlation_B.png",
+                        dpi = 400)
+```
+
 
 # Evaluate simulation
 
@@ -643,18 +883,6 @@ df_work_tidy_evaluate
 
 ## Calculation evaluating multivariate normality
 
-### Settings multicore
-```{r}
-library(multidplyr)
-
-if (Sys.getenv("RSTUDIO") == "1" && !nzchar(Sys.getenv("RSTUDIO_TERM")) && 
-    (Sys.info()["sysname"] == "Darwin" || Sys.info()["sysname"] == "Linux") && 
-    getRversion() >= "4.0.0") {
-  parallel:::setDefaultClusterOptions(setup_strategy = "sequential")
-}
-
-cluster <- new_cluster(parallel::detectCores())
-```
 
 ### Evaluation
 
