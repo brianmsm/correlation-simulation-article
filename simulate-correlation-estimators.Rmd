@@ -858,6 +858,77 @@ plot_assess_B <- df_work_tidy_simp %>%
 knitr::include_graphics("img/Evaluate_correlation_RMSEA_Bias_B.png")
 ```
 
+```{r}
+plot_assess_C <- df_work_tidy_simp %>%
+  mutate(
+    correlacion = factor(correlacion, 
+                         labels = c("0.12", "0.20",
+                                    "0.31", "0.50")),
+    Tipo_Sim = fct_collapse(Tipo_Sim,
+                            "MVN" = "MVN",
+                            "MVN OL M3" = "OL M3",
+                            "MVN OL M6" = "OL M6",
+                            "MVN OL M3V" = c("OL M3 V1", "OL M3 V2", "OL M3 V3"),
+                            "MVN OL M6V" = c("OL M6 V1", "OL M6 V2", "OL M6 V3"),
+                            "No-MVN" = c("No-MVN A", "No-MVN C", "No-MVN D"),
+                            "No-MVN ks+" = c("No-MVN B", "No-MVN E")),
+    Ajuste = str_replace(Ajuste, "RMSE", "ARMSE"),
+    Ajuste = str_replace(Ajuste, "Sesgo", "Bias")
+  ) %>%  
+  ggplot(aes(x = Tipo_Sim, y = Valor,
+             # colour = Ajuste,
+             shape = Ajuste,
+             linetype = Ajuste,
+             group = Ajuste)) +
+  geom_point(color = "#3a3a3a", size = 2) +
+  geom_path(color = "#3a3a3a") +
+  scale_y_continuous(limits = c(-0.5, 5.5),
+                     breaks = seq(-0.5, 5.5, 1)) +
+  labs(title = NULL,
+       x = "Conditions of Simulation",
+       y = NULL) +
+  # scale_x_discrete(guide = guide_axis(n.dodge = 2)) +
+  facet_grid(correlacion ~ n) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5,
+                              size = 12,
+                              face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    text = element_text(
+      size = 11,
+      face="bold"), 
+    axis.text = element_text(
+      size = 9,
+      face="plain",
+      colour="black"),
+    axis.text.x = element_text(angle = 90),
+    axis.title.x = element_text(
+      size = 11,
+      margin = margin(t = 7, r = 0, b = 0, l = 0)
+    ),
+    strip.text = element_text(
+      size = 11
+    ),
+    legend.title = element_blank(),
+    legend.text = element_text(
+      face="plain",
+      colour="black",
+      size=10),
+    panel.spacing = unit(0.8, "lines")
+  ) 
+
+
+# ggsave(filename = "img/Evaluate_correlation_RMSEA_Bias_C.png",
+#        plot = plot_assess_C, width = 10.75, height = 7, 
+#        dpi = 300)
+```
+
+```{r echo=FALSE, out.width='100%'}
+knitr::include_graphics("img/Evaluate_correlation_RMSEA_Bias_C.png")
+```
+ 
+
 # Evaluate normality
 
 ## Calculation of kurtosis and skewness for each variable
