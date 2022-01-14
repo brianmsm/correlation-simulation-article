@@ -1,5 +1,5 @@
 ---
-title: "Correlation example data"
+title: "Correlation DASS data"
 date: "06/01/2022"
 author:
   - name: José Ventura-León
@@ -83,6 +83,8 @@ dass_format <- dass %>%
          VCL12 == 0) %>% 
   select(Depression, Anxiety, Agreeableness,
          Conscientiousness, Emotional_Stability)
+
+dass_format
 ```
 
 # Data Analysis
@@ -101,6 +103,8 @@ correlation_population <- correlation_population %>%
       (Parameter1 == "Agreeableness" & Parameter2 == "Emotional_Stability") |
       (Parameter1 == "Agreeableness" & Parameter2 == "Conscientiousness")
   )
+
+correlation_population
 ```
 
 # Sampling generation
@@ -150,6 +154,8 @@ dass_sample_final <- dass_sample_final %>%
   ) %>% 
   mutate(sample_n = str_remove(sample_n, "sample_")) %>% 
   unnest("data")
+
+dass_sample_final
 ```
 
 # Correlation analysis
